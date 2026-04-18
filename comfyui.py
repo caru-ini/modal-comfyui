@@ -10,11 +10,20 @@ from plugins import comfy_plugins
 
 root_dir = Path(__file__).parent
 
+COMFY_MODELS_ROOT = Path("/root/comfy/ComfyUI/models")
+
+
+def resolve_model_dir(model_dir: str) -> Path:
+    """Resolve model_dir: absolute paths are used as-is, relative paths are
+    placed under /root/comfy/ComfyUI/models/ (e.g. "checkpoints")."""
+    p = Path(model_dir)
+    return p if p.is_absolute() else COMFY_MODELS_ROOT / p
+
 
 def hf_download(
     repo_id: str,
     filename: str,
-    model_dir: str = "/root/comfy/ComfyUI/models/checkpoints",
+    model_dir: str = "checkpoints",
 ):
     import subprocess
 
@@ -27,14 +36,15 @@ def hf_download(
         cache_dir="/cache",
     )
 
-    Path(model_dir).mkdir(parents=True, exist_ok=True)
+    target_dir = resolve_model_dir(model_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
     local_filename = Path(filename).name
     _ = subprocess.run(
-        f"ln -s {model} {model_dir}/{local_filename}",
+        f"ln -s {model} {target_dir}/{local_filename}",
         shell=True,
         check=True,
     )
-    print(f"Downloaded {repo_id}/{filename} to {model_dir}/{local_filename}")
+    print(f"Downloaded {repo_id}/{filename} to {target_dir}/{local_filename}")
 
 
 def download_external_model(url: str, filename: str, model_dir: str):
@@ -66,8 +76,9 @@ def download_external_model(url: str, filename: str, model_dir: str):
             stderr=subprocess.DEVNULL,
         )
 
-    Path(model_dir).mkdir(parents=True, exist_ok=True)
-    target_path = Path(model_dir) / filename
+    target_dir = resolve_model_dir(model_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / filename
 
     # Remove existing file/link if it exists to ensure fresh link
     if target_path.exists() or target_path.is_symlink():
@@ -75,7 +86,7 @@ def download_external_model(url: str, filename: str, model_dir: str):
 
     # Create symlink
     target_path.symlink_to(cached_path)
-    print(f"Linked {filename} to {model_dir}/{filename}")
+    print(f"Linked {filename} to {target_path}")
 
 
 def download_all():

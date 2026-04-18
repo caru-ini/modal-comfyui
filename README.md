@@ -31,6 +31,11 @@ Copy `models.example.py` to `models.py` and edit it to manage your models. You c
 - External models(`models_ext`, e.g. civitai) using a direct `url`.
 
 Models are downloaded to volumes and symlinked to the specified `model_dir`.
+
+`model_dir` accepts two styles:
+- **Relative path** (recommended for standard ComfyUI folders): resolved under `/root/comfy/ComfyUI/models/`. e.g. `"checkpoints"` → `/root/comfy/ComfyUI/models/checkpoints`.
+- **Absolute path**: used as-is. Use this when the target lives outside `ComfyUI/models/` (e.g. a custom node's own model directory).
+
 See `models.example.py` for reference.
 
 ### Plugins and Custom Nodes
