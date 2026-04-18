@@ -25,6 +25,7 @@ def hf_download(
     filename: str,
     model_dir: str = "checkpoints",
 ):
+    import os
     import subprocess
 
     # Download model from Hugging Face
@@ -34,17 +35,21 @@ def hf_download(
         repo_id=repo_id,
         filename=filename,
         cache_dir="/cache",
+        token=os.environ.get("HF_TOKEN"),
     )
 
     target_dir = resolve_model_dir(model_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     local_filename = Path(filename).name
+    target_path = target_dir / local_filename
+    if target_path.exists() or target_path.is_symlink():
+        target_path.unlink()
     _ = subprocess.run(
-        f"ln -s {model} {target_dir}/{local_filename}",
+        f"ln -s {model} {target_path}",
         shell=True,
         check=True,
     )
-    print(f"Downloaded {repo_id}/{filename} to {target_dir}/{local_filename}")
+    print(f"Downloaded {repo_id}/{filename} to {target_path}")
 
 
 def download_external_model(url: str, filename: str, model_dir: str):
@@ -118,15 +123,16 @@ image = image.env({"HF_HUB_ENABLE_HF_TRANSFER": "1"}).run_function(
 # setup custom nodes
 workflow_file_path = Path(__file__).parent / "workflow_api.json"
 if workflow_file_path.exists():
-    image = (
-        image.add_local_file(workflow_file_path, "/root/workflow_api.json", copy=True)
-        .run_commands("comfy node install-deps --workflow=/root/workflow_api.json")
-        .run_commands("comfy node install " + " ".join(comfy_plugins))
-    )
+    image = image.add_local_file(
+        workflow_file_path, "/root/workflow_api.json", copy=True
+    ).run_commands("comfy node install-deps --workflow=/root/workflow_api.json")
 else:
     print(
         f"Warning: {workflow_file_path} not found. API endpoint might not work without a workflow."
     )
+
+if comfy_plugins:
+    image = image.run_commands("comfy node install " + " ".join(comfy_plugins))
 
 app = modal.App(name="modal-comfyui", image=image)
 
