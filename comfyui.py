@@ -116,7 +116,9 @@ image = (
 
 # download models
 image = image.env({"HF_HUB_ENABLE_HF_TRANSFER": "1"}).run_function(
-    download_all, volumes={"/cache": vol}
+    download_all, 
+    volumes={"/cache": vol}, 
+    secrets=[modal.Secret.from_name("huggingface-secret")
 )
 
 
