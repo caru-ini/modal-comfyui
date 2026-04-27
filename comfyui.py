@@ -151,3 +151,16 @@ def ui():
     _ = subprocess.Popen(
         "comfy launch --background -- --listen 0.0.0.0 --port 8000", shell=True
     )
+
+@app.function(
+    max_containers=1,
+    volumes={"/cache": vol},
+    scaledown_window=60,  # idle 1 minutes to shutdown
+    enable_memory_snapshot=True,
+)
+@modal.concurrent(max_inputs=10)
+@modal.web_server(8001, startup_timeout=60)
+def ui_cpu():
+    _ = subprocess.Popen(
+        "comfy launch --background -- --listen 0.0.0.0 --port 8001 --cpu", shell=True
+    )
