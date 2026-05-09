@@ -193,7 +193,7 @@ class ComfyUI:
         wait_for_port(8000, timeout=30)
         print("App Restored!")
     
-    @modal.web_server(8000, startup_timeout=60)
+    @modal.web_server(8000, startup_timeout=300)
     def ui(self):
         print("App Ready!")
     
