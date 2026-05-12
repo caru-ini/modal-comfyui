@@ -21,6 +21,10 @@ Good for testing wan2.2 or other video generation models.
    ```bash
    modal setup
    ```
+4. Set up your modal secret (optional; recommended)
+   ```bash
+   modal secret create huggingface-secret HF_TOKEN=hf_[your HF access token]
+   ```
 
 ## Configuration
 
