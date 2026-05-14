@@ -162,7 +162,7 @@ if comfy_plugins_ext:
         # install dependencies from one or more requirements files (usually .txt or .toml files, but can support any extension)
         plugin_reqs = plugin.get("requirements", "").strip()
         if plugin_reqs:
-            image = image.run_commands(f"cd {nodes_dir}/{folder_name} && uv pip install -r {plugin_reqs.split()}")
+            image = image.run_commands(f"cd {nodes_dir}/{folder_name} && uv pip install -r {plugin_reqs}")
 
         # run installation script (usually install.py or setup.py)
         plugin_install = plugin.get("install", "").strip()
