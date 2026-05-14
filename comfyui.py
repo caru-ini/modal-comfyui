@@ -172,7 +172,7 @@ if comfy_plugins_ext:
             else:
                 print(f"Unsupported installation script: {plugin_install}")
 
-        # install optional packages or packages that cause dependency issue with other custom nodes due to pinned to an incompatible version
+        # install optional packages or packages that got dependency issue with other custom nodes due to pinned to an incompatible version
         plugin_deps = plugin.get("dependencies", "").strip()
         if plugin_deps:
             image = image.uv_pip_install(plugin_deps.split())
