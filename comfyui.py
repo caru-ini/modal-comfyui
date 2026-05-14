@@ -109,10 +109,11 @@ vol = modal.Volume.from_name("hf-hub-cache", create_if_missing=True)
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .add_local_python_source("models", "plugins", copy=True)
-    .apt_install("git", "git-lfs", "libgl1-mesa-dev", "libglib2.0-0", "aria2")
+    .apt_install("git", "git-lfs", "libgl1-mesa-dev", "libglib2.0-0", "aria2", "nginx")
     .pip_install_from_requirements(str(root_dir / "requirements_comfy.txt"))
     .run_commands("comfy --skip-prompt install --nvidia")
     .run_commands("git lfs install")
+    .add_local_file(str(root_dir / "nginx.conf"), "/root/nginx.conf", copy=True)
 )
 
 def _hf_secrets() -> list[modal.Secret]:
@@ -183,18 +184,19 @@ class ComfyUI:
     @modal.enter(snap=True)
     def start_checkpoint(self):
         self.proc = subprocess.Popen(
-            "comfy launch --background -- --listen 0.0.0.0 --port 8000", shell=True
+            "comfy launch --background -- --listen 127.0.0.1 --port 8188", shell=True
         )
         # Block here — snapshot is taken only after this returns
-        wait_for_port(8000, timeout=300)
+        wait_for_port(8188, timeout=300)
 
     @modal.enter(snap=False)
     def start_restore(self):
-        wait_for_port(8000, timeout=30)
+        wait_for_port(8188, timeout=30)
         print("App Restored!")
     
     @modal.web_server(8000, startup_timeout=300)
     def ui(self):
+        subprocess.Popen(["nginx", "-c", "/root/nginx.conf", "-g", "daemon off;"])
         print("App Ready!")
     
     @modal.exit()
