@@ -7,7 +7,7 @@ from pathlib import Path
 import modal
 
 from models import models, models_ext
-from plugins import comfy_plugins
+from plugins import comfy_plugins, comfy_plugins_ext
 
 root_dir = Path(__file__).parent
 
