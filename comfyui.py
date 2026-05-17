@@ -13,6 +13,7 @@ root_dir = Path(__file__).parent
 
 COMFY_MODELS_ROOT = Path("/root/comfy/ComfyUI/models")
 
+GPU_TYPE = os.getenv("MODAL_GPU", "L4")
 
 def resolve_model_dir(model_dir: str) -> Path:
     """Resolve model_dir: absolute paths are used as-is, relative paths are
@@ -172,7 +173,7 @@ app = modal.App(name="modal-comfyui", image=image)
 
 @app.cls(
     max_containers=1,
-    gpu="L4",
+    gpu=GPU_TYPE,
     volumes={"/cache": vol},
     scaledown_window=60,  # idle 1 minutes to shutdown
     enable_memory_snapshot=True,
