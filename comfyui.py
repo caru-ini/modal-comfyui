@@ -4,6 +4,7 @@ import os
 import shlex
 import subprocess
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import modal
 
@@ -70,21 +71,25 @@ def download_external_model(url: str, filename: str, model_dir: str):
     cached_path = Path(cache_dir) / filename
     if not cached_path.exists():
         print(f"Downloading {filename} from {url}...")
-        # Use CivitAI token when available
-        token_hdr = ""
-        if url.startswith("https://civitai.com/") or url.startswith("https://civitai.red/"):
+        # Pass the CivitAI token as a query param rather than an Authorization
+        # header: axel re-sends -H headers to the redirect target (an R2
+        # presigned URL), which rejects them with 400.
+        download_url = url
+        if url.startswith(("https://civitai.com/", "https://civitai.red/")):
             token = os.environ.get("CIVITAI_TOKEN", "")
             if token:
-                token_hdr = f"Authorization: Bearer {token}"
-            
+                parts = urlsplit(url)
+                query = dict(parse_qsl(parts.query))
+                query.setdefault("token", token)
+                download_url = urlunsplit(parts._replace(query=urlencode(query)))
+
         try:
             _ = subprocess.run(
                 [
                     "axel",
-                    "-H", token_hdr,
                     "-n", "16",
                     "-o", cached_path,
-                    url,
+                    download_url,
                 ],
                 check=True,
                 stdout=subprocess.DEVNULL,
