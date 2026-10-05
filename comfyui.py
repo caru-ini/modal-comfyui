@@ -23,6 +23,8 @@ COMFY_MODELS_ROOT = Path("/root/comfy/ComfyUI/models")
 GPU_TYPE = os.getenv("MODAL_GPU", "L4")
 COMFY_VER = os.getenv("COMFY_VER")
 
+COMFY_PORT = 8000
+
 def resolve_model_dir(model_dir: str) -> Path:
     """Resolve model_dir: absolute paths are used as-is, relative paths are
     placed under /root/comfy/ComfyUI/models/ (e.g. "checkpoints")."""
@@ -132,6 +134,7 @@ image = (
     .pip_install_from_requirements(str(root_dir / "requirements_comfy.txt"))
     .run_commands(f"comfy --skip-prompt install --nvidia {VERSION}")
     .run_commands("git lfs install")
+    .uv_pip_install(["fastapi", "httpx", "websockets", "starlette-compress", "brotli", "zstandard"])
 )
 
 def _hf_secrets() -> list[modal.Secret]:
@@ -242,7 +245,19 @@ def wait_for_port(port: int, timeout: int = 60):
         except OSError:
             time.sleep(0.5)
     raise TimeoutError(f"ComfyUI never became ready on port {port}")
-    
+
+with image.imports():
+    import asyncio
+    import httpx
+    import websockets
+    from fastapi import FastAPI, Request, WebSocket # Request must not be imported inside a function when using "from __future__ import annotations" 
+    from fastapi.responses import StreamingResponse, JSONResponse
+    from starlette.websockets import WebSocketDisconnect
+    from starlette_compress import CompressMiddleware
+    from websockets.exceptions import ConnectionClosed
+    from websockets.asyncio.client import connect as ws_connect
+    from contextlib import asynccontextmanager
+
 app = modal.App(name="modal-comfyui", image=image)
 
 
@@ -259,19 +274,157 @@ class ComfyUI:
     @modal.enter(snap=True)
     def start_checkpoint(self):
         self.proc = subprocess.Popen(
-            "comfy launch --background -- --listen 0.0.0.0 --port 8000", shell=True
+            f"comfy launch --background -- --listen 0.0.0.0 --port {COMFY_PORT} --enable-cors-header 'http://127.0.0.1:{COMFY_PORT}'", shell=True
         )
         # Block here — snapshot is taken only after this returns
-        wait_for_port(8000, timeout=300)
+        wait_for_port(COMFY_PORT, timeout=300)
 
     @modal.enter(snap=False)
     def start_restore(self):
-        wait_for_port(8000, timeout=30)
+        wait_for_port(COMFY_PORT, timeout=30)
         print("App Restored!")
     
-    @modal.web_server(8000, startup_timeout=300)
+    @modal.asgi_app()
     def ui(self):
+        BACKEND_HTTP = f"http://127.0.0.1:{COMFY_PORT}"
+        BACKEND_WS = f"ws://127.0.0.1:{COMFY_PORT}"
+        STRIP_HEADERS = {
+            "modal-function-call-id", # modal header that could cause images not to shows up (ie. rendering issue) on client side.
+        }
+        HOP_BY_HOP = {
+            "connection", "keep-alive", 
+            "transfer-encoding", "content-length", "content-encoding",
+        }
+        WS_HANDSHAKE_HEADERS = {
+            "host", "connection", "upgrade", "origin",
+            "sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol",
+            "sec-websocket-extensions", "sec-websocket-accept",
+        }
+
+        client = httpx.AsyncClient(base_url=BACKEND_HTTP, timeout=httpx.Timeout(30.0, read=300.0))
+        
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            # startup (runs before the app starts serving)
+            yield
+            # shutdown (runs when the app is stopping)
+            await client.aclose()
+    
+        app = FastAPI(lifespan=lifespan)
+        
+        # Enable automatic compression
+        app.add_middleware(
+            CompressMiddleware, # All-in-One compression middleware (Zstd, Brotli, and Gzip)
+            zstd_level=10,      # Standard Zstd compression level (1-19)
+            brotli_quality=6,   # Brotli: 0 to 11
+            gzip_level=5,       # Gzip: 1 to 9
+            minimum_size=1000,  # Bytes: skip small payloads to protect CPU overhead
+        )
+
+
+        def filtered(headers):
+            h = {k: v for k, v in headers.items() if k.lower() not in STRIP_HEADERS | HOP_BY_HOP}
+            return h
+    
+        def filtered_ws(headers):
+            h = {
+                k: v for k, v in headers.items()
+                if k.lower() not in (STRIP_HEADERS | WS_HANDSHAKE_HEADERS)
+            }
+            return h
+
+        
+        @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+        async def proxy_http(path: str, request: Request):
+            query = request.url.query  # str, the raw query as received
+            url = f"/{path}" + (f"?{query}" if query else "")
+            req = client.build_request(
+                request.method,
+                url,
+                headers=filtered(request.headers),
+                content=request.stream(),   # stream request body in
+            )
+            
+            try:
+                backend_resp = await client.send(req, stream=True)
+            except httpx.ConnectError:
+                return JSONResponse({"error": "backend unavailable"}, status_code=502)
+            except httpx.TimeoutException:
+                return JSONResponse({"error": "backend timeout"}, status_code=504)
+
+            async def body_iter():
+                try:
+                    async for chunk in backend_resp.aiter_bytes():
+                        yield chunk
+                except httpx.StreamError:
+                    pass  # client or backend disconnected mid-stream; nothing more we can do
+                finally:
+                    await backend_resp.aclose()
+                    
+            return StreamingResponse(
+                body_iter(),
+                status_code=backend_resp.status_code,
+                headers=filtered(backend_resp.headers),
+            )
+
+        @app.websocket("/{path:path}")
+        async def proxy_ws(websocket: WebSocket, path: str):
+            headers = filtered_ws(websocket.headers)
+            raw_protocols = websocket.headers.get("sec-websocket-protocol")
+            subprotocols = [p.strip() for p in raw_protocols.split(",")] if raw_protocols else None
+  
+            qs = websocket.url.query
+            backend_url = f"{BACKEND_WS}/{path}" + (f"?{qs}" if qs else "")
+
+            try:
+                backend_ws = await ws_connect(
+                    backend_url,
+                    additional_headers=headers,
+                    subprotocols=subprotocols,
+                ).__aenter__()
+            except Exception:
+                await websocket.close(code=1011)  # internal error
+                return
+
+            await websocket.accept(subprotocol=backend_ws.subprotocol)
+
+            try:
+                async def client_to_backend():
+                    try:
+                        while True:
+                            msg = await websocket.receive()
+                            if msg["type"] == "websocket.disconnect":
+                                break
+                            if "text" in msg:
+                                await backend_ws.send(msg["text"])
+                            elif "bytes" in msg:
+                                await backend_ws.send(msg["bytes"])
+                    except (WebSocketDisconnect, ConnectionClosed):
+                        pass
+
+                async def backend_to_client():
+                    try:
+                        async for message in backend_ws:
+                            if isinstance(message, str):
+                                await websocket.send_text(message)
+                            else:
+                                await websocket.send_bytes(message)
+                    except ConnectionClosed:
+                        pass
+
+                done, pending = await asyncio.wait(
+                    [asyncio.create_task(client_to_backend()), asyncio.create_task(backend_to_client())],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+            finally:
+                await backend_ws.close()
+                if websocket.client_state.name != "DISCONNECTED":
+                    await websocket.close()
+            
         print("App Ready!")
+        return app
     
     @modal.exit()
     def cleanup(self):
