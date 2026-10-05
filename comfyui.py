@@ -52,13 +52,13 @@ def hf_download(
     target_dir.mkdir(parents=True, exist_ok=True)
     local_filename = Path(filename).name
     target_path = target_dir / local_filename
+
+    # Remove existing file/link if it exists to ensure fresh link
     if target_path.exists() or target_path.is_symlink():
         target_path.unlink()
-    _ = subprocess.run(
-        f"ln -s {model} {target_path}",
-        shell=True,
-        check=True,
-    )
+
+    # Create symlink
+    target_path.symlink_to(model)
     print(f"Downloaded {repo_id}/{filename} to {target_path}")
 
 
