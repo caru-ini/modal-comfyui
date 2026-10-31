@@ -44,8 +44,9 @@ See `models.example.py` for reference.
 
 ### Plugins and Custom Nodes
 
-Copy `plugins.example.py` to `plugins.py` and edit it to add custom node IDs or titles to be installed via `comfy-cli`.
-- **Workflow Dependencies**: If you have a `workflow_api.json` in the root directory, the setup will automatically install the necessary custom nodes for that workflow.
+Copy `plugins.example.py` to `plugins.py`.
+- **Workflow Dependencies**: If you have a `workflow_api.json` in the root directory, the setup will automatically install the necessary custom nodes for that workflow, including nodes inside subgraphs. Nodes are found by the registry ID (`cnr_id`) that ComfyUI records in the workflow.
+- **Manual additions**: If some custom nodes are still missing, add their IDs to `plugins.py`.
 
 ### In case of Insufficient Custom Node
 
