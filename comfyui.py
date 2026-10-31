@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -158,19 +159,42 @@ image = image.env(
 ).run_function(download_all, volumes={"/cache": vol}, secrets=_hf_secrets())
 
 
+def find_cnr_ids(data) -> set[str]:
+    """Collect the Comfy Registry IDs (``cnr_id``) recorded on every node of a
+    UI-format workflow, including nodes nested in subgraphs, which
+    ``comfy node install-deps`` does not scan."""
+    if isinstance(data, dict):
+        ids = {data["cnr_id"]} if isinstance(data.get("cnr_id"), str) else set()
+        children = data.values()
+    elif isinstance(data, list):
+        ids, children = set(), data
+    else:
+        return set()
+    for child in children:
+        ids |= find_cnr_ids(child)
+    return ids
+
+
 # setup custom nodes
+node_ids = set(comfy_plugins)
 workflow_file_path = Path(__file__).parent / "workflow_api.json"
 if workflow_file_path.exists():
     image = image.add_local_file(
         workflow_file_path, "/root/workflow_api.json", copy=True
     ).run_commands("comfy node install-deps --workflow=/root/workflow_api.json")
+    workflow = json.loads(workflow_file_path.read_text(encoding="utf-8"))
+    # comfy-core is ComfyUI itself, not an installable node pack
+    node_ids |= find_cnr_ids(workflow) - {"comfy-core"}
 else:
     print(
         f"Warning: {workflow_file_path} not found. API endpoint might not work without a workflow."
     )
 
-if comfy_plugins:
-    image = image.run_commands("comfy node install " + " ".join(comfy_plugins))
+if node_ids:
+    # Packs already installed by install-deps are skipped by comfy-cli.
+    image = image.run_commands(
+        "comfy node install " + " ".join(shlex.quote(i) for i in sorted(node_ids))
+    )
 
 
 def install_ext_plugin(image: modal.Image, plugin: dict) -> modal.Image:

@@ -1,5 +1,6 @@
 comfy_plugins = [
-    # put comfyui custom node id here
+    # Custom nodes used in workflow_api.json are installed automatically.
+    # Add a node here only if ComfyUI still reports it as missing.
     # IMPORTANT: node id from comfyui registry (Not node name)
 ]
 
